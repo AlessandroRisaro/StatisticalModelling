@@ -1,2 +1,2 @@
 # StatisticalModelling
-Code for the Statistical Modelling exam
+Code for Statistical Modelling exam
