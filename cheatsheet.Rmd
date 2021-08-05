@@ -1,0 +1,1041 @@
+---
+title: "Codice Vittadini"
+output: html_document
+author: Alessandro Risaro
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Fase di setting dell' ambiente R
+
+Comando per ripulire l'environment
+
+```{r }
+rm(list=ls())
+```
+
+Caricamento delle librerie utili alla nostra analisi
+```{r, message=FALSE, warning=FALSE }
+library(car)
+library(describedata)
+library(skedastic)
+library(psych)
+library(klaR)
+library(olsrr)
+library(sandwich) #importata in companies e anche in countries
+#library(het.test) #importata in hartangel
+library(DataCombine)#importata in hartangel
+library(systemfit) #importata in countries,cigarettes e anche in hsb
+library(lmtest) #importata in countries,cigarettes e anche in hsb
+library(ggplot2)
+```
+Funzione white test del prof (meno restrittiva di quella di R)
+White test che valuta l'eteroschedasticità basandosi sul modello di regressione in cui come variabile indipendente si ha il quadrato dei residui e come variabili indipendenti ci sono i fittedvalues e i fitted values al quadrato. Questo test è meno restrittivo delprecedente. Infatti, il white test precdente si basava su unaregressione dei residui al quadrato, su variabili indipendenti, i  loro quadrati e le loro interazioni.
+```{r }
+white.test<-function(lmod){
+  
+  u2<-lmod$residuals^2
+  
+  y<-lmod$fitted
+  
+  R2u<-summary(lm(u2~y+I(y^2)))$r.squared
+  
+  LM<-length(y)*R2u
+  
+  p.val<-1-pchisq(LM,2)
+  
+  data.frame("Test Statistic"=LM, "P"=p.val)
+  
+}
+```
+
+Importare i dati (definire il separatore)
+```{r }
+nazioni<-read.csv(file.choose(), sep=";")
+companies<-read.csv(file.choose(), sep=';')
+hartangel<-read.csv(file.choose(), sep=",")
+countries<-read.csv(file.choose(),sep=';')
+cigarettes<-read.csv(file.choose(),sep=' ')
+hsb<-read.csv(file.choose(),sep=',')
+esame<-read.csv(file.choose(),sep=';')
+```
+## Preprocessing e pulizia dei dati
+In hartangel notiamo che le variabili ftheft e mtheft hanno dei valori nulli e che i dati non sono ordinati nel tempo.
+Eliminiamo tutte le righe che hanno almeno una covariata missed e procediamo ad ordinarli temporalmente
+```{r }
+hartangel<-na.omit(hartangel)
+hartangel<-hartangel[order(hartangel$year),]
+```
+Consegna: Regressioni lineari multiple di packpc sulle covariate cpi, pop, income e tax per gli stati Arkansas (state=”AR”) e California (state=”CA”)
+
+Dobbiamo fare del subsetting in quanto ci vogliamo riferire solo ai dati relativi ad un determinato stato
+```{r}
+cigarettesca<-cigarettes[cigarettes$state=='CA',] #tutte le osservazioni che hanno come stato la california
+cigarettesar<-cigarettes[cigarettes$state=='AR',] #tutte le osservazioni che hanno come stato l'arizona
+```
+
+Andiamo ad aggiungere il prefisso CA ai nomi delle variabili che si trovano nel nuovo dataset cigarettesca e il prefisso AR alle variabili che si trovano nel nuovo dataset cigarettesar
+```{r}
+names(cigarettesca)<-paste0(names(cigarettesca),'_CA')
+names(cigarettesar)<-paste0(names(cigarettesar),'_AR')
+```
+
+Aandiamo ad eliminare alcune colonne che contengono delle informazioni ridondanti
+```{r}
+cigarettesca$state_CA<-NULL
+cigarettesca$ID_CA<-NULL
+cigarettesar$state_AR<-NULL
+cigarettesar$ID_AR<-NULL
+```
+Andiamo ad unire i due dataset
+```{r}
+cigarettesarca<-cbind(cigarettesca,cigarettesar)
+
+```
+
+Andiamo ad unificare la colonna year in una sola così da fare un po' di pulizia del dataset E facciamo anche la stessa cosa con la variabile cpi (che è una costante)
+```{r}
+cigarettesarca$year<-cigarettesca$year_CA
+cigarettesarca$year_CA<-NULL
+cigarettesarca$year_AR<-NULL
+cigarettesarca$cpi<-cigarettesca$cpi_CA
+cigarettesarca$cpi_CA<-NULL
+cigarettesarca$cpi_AR<-NULL
+```
+
+
+## Statistiche descrittive
+Guardare i dati
+```{r }
+View(nazioni)
+View(cigarettes)
+View(hsb)
+```
+Notiamo che relig viene tratta come una variabile numerica, mentre è una variabile categorica quindi procediamo a renderla categorica
+```{r }
+nazioni$relig<-as.factor(nazioni$relig)
+```
+Notiamo che in cigarettes la variabile cpi è una costante in ogni anno
+Notiamo che in hsb il dataset è composto da 5 variablili stringa e 5 variabili numeriche e 5 variabili stringa, più la variabile id (fattorizziamo le variabili gender e prog in quanto sono le uniche richieste nell'esercizio)
+```{r}
+hsb$gender<-as.factor(hsb$gender)
+hsb$prog<-as.factor(hsb$prog)       #questo comando farà si che il nostro lm le riconoscerà come delle variabili dummy
+```
+
+Creiamo un vettore contenente tutte le variabili numeriche
+```{r }
+var_num_nazioni<-c("densita","urbana","vitamas","vitafem","alfabet","pil")
+var_num_companies<-c('assets','mark_val','sales','profits','cash','employ')
+var_num_countries<-c('Area','Irrigated','Population','Under.14','Life.expectancy','Literacy.Rate','Unemployment','ISPs.million','Tvs.person','Railways','Airports')
+var_num_cigarettes<-c('cpi','pop','packpc','income','tax','avgprs','taxs')
+var_num_hsb<-c('read','write','math','science','socst')
+```
+Calcoliamo alcune statistiche descrittive (possiamo decidere se mettere solo var_num o anche relig)
+```{r }
+summary(nazioni)
+```
+```{r }
+summary(nazioni[,var_num_nazioni])
+```
+Vediamo la distribuzione della variabile categorica in un altro modo e anche per hsb
+```{r }
+table(nazioni$relig)/nrow(nazioni)
+table(hsb$gender)
+table(hsb$gender)/nrow(data)
+table(hsb$prog)
+table(hsb$prog)/nrow(data)
+```
+
+Vediamo altre statistiche descrittive creando boxplot per le singole variabili e boxplot condizionati
+```{r}
+var_num_esame<-c("LOCUS_OF_CONTROL","SELF_CONCEPT","READ","WRITE","SCIENCE","MOTIVATION")
+par(mfrow=c(2,3))
+for( i in var_num_esame){ boxplot(esame[,i], main=i,
+col="lightblue", ylab=i)}
+```
+```{r}
+
+
+ggplot(esame, aes(y = LOCUS_OF_CONTROL)) +
+geom_boxplot(fill = "lightblue", outlier.colour = "red") +
+facet_wrap(~PROG) +
+ggtitle("PROG") +
+theme_minimal() +
+theme(plot.title = element_text(hjust =0.5))
+
+ggplot(esame, aes(y = SELF_CONCEPT)) +
+geom_boxplot(fill = "lightblue", outlier.colour = "red") +
+facet_wrap(~PROG) +
+ggtitle("PROG") +
+theme_minimal() +
+theme(plot.title = element_text(hjust =0.5))
+
+ggplot(esame, aes(y = READ)) +
+geom_boxplot(fill = "lightblue", outlier.colour = "red") +
+facet_wrap(~PROG) +
+ggtitle("PROG") +
+theme_minimal() +
+theme(plot.title = element_text(hjust =0.5))
+
+ggplot(esame, aes(y = WRITE)) +
+geom_boxplot(fill = "lightblue", outlier.colour = "red") +
+facet_wrap(~PROG) +
+ggtitle("PROG") +
+theme_minimal() +
+theme(plot.title = element_text(hjust =0.5))
+
+ggplot(esame, aes(y = SCIENCE)) +
+geom_boxplot(fill = "lightblue", outlier.colour = "red") +
+facet_wrap(~PROG) +
+ggtitle("PROG") +
+theme_minimal() +
+theme(plot.title = element_text(hjust =0.5))
+
+ggplot(esame, aes(y = MOTIVATION)) +
+geom_boxplot(fill = "lightblue", outlier.colour = "red") +
+facet_wrap(~PROG) +
+ggtitle("PROG") +
+theme_minimal() +
+theme(plot.title = element_text(hjust =0.5))
+```
+Andiamo a plottare gli istogrammi per ogni variabile esplicativa
+```{r}
+par(mfrow=c(2,3))
+for( i in var_num_esame){ hist(esame[,i], main=i,
+col="lightblue",xlab=' ')}
+```
+
+Descriviamo le correlazioni tra le variabili numeriche 
+```{r }
+pairs.panels(nazioni[,var_num_nazioni])
+```
+Vediamo una forte correlazione tra le variabili vitamas e vitafem e anche tre vitafem e alfabet e tra vitamas alfabet vi sono correlazioni meno forti, ma evidenti
+Le variabili non sembrano distribuirsi normalmente, in particolare, la variabile densità è caratterizzata da una distribuzione assimmetrica positiva, vitamas, vitafem e alfabet sono caratterizzate da una distribuzione assimmetrica negativa, mentre pil sembra presentare due mode (quindi c'è un grande gruppo di paesi poveri e un grande numero di paesi più ricchi)
+
+Andiamo a vedere come fare sia i summary che i pairs panels condizionati 
+```{r }
+summary(hsb[hsb$gender=='female',var_num_hsb])
+summary(hsb[hsb$gender=='male',var_num_hsb])
+```
+Vediamo che per esempio nella lettura i maschi ottengono un punteggio medio più alto
+```{r }
+par(mfrow=c(1,2))
+pairs.panels(hsb[hsb$gender=='male',var_num_hsb])
+pairs.panels(hsb[hsb$gender=='female',var_num_hsb])
+```
+## Statistiche descrittive per serie temporali
+In hartangel che era una serie temporale quando indaghiamo le correlazioni dobbiamo togliere la variabile years
+```{r }
+pairs.panels(hartangel[,-1])
+```
+Andiamo a vedere l'andamento della nostra variabile dipendente nel tempo
+
+```{r }
+plot(hartangel$year,hartangel$ftheft,ylab="ftheft",xlab='year',type='b')
+abline(h=mean(hartangel$ftheft))
+
+```
+Vediamo che dal 1955 in poi inizia un trend crescente, mentre prima del '55 si vedono fluttuazioni intorno al valore 20, inoltre in questo range di fluttuazioni si vedono valori che tendono ad essere uguali tra di loro che indicano la possibile presenza di autocorrelazione positiva.
+
+ATTENZIONE QUESTA NON E' L'AUTOCORRELAZIONE DEI RESIDUIIII
+Andiamo a verificare la presenza di una correlazione positiva attraverso un correlogramma
+```{r }
+par(mfrow=c(2,1))
+acf(hartangel$ftheft,main='autocorr. variabile dipendente')
+pacf(hartangel$ftheft,main='autocorr. parziale variabile dipendente')
+
+```
+Il primo grafico indica l autocorrelazione della variabile dipendente a diversi lag temporali, vediamo che vi sono autocorrelazioni significative  fino al quarto lag (ricordiamo l'ACF al lag 0 non va mai letta)
+Il secondo grafico ci segnala la presenza di autocorrelazione significativa di ordine 1
+Quindi possiamo concludere che vi sia almeno un autocorrelazione positiva di primo ordine.
+
+### Modelli lineari classici multipli: diagnostica ipotesi e correlazione tra i residui
+
+## Soluzione eteroschedasticità apportando trasformazioni alle variabili dipendenti ed indipendenti
+Iniziamo svolgendo una regressione lineare tra le variabili dipendenti e indipendenti richieste (alt+126= ~)
+```{r }
+lin_nazioni<-lm(pil~alfabet, nazioni)
+summary(lin_nazioni) ## vediamo che il model
+
+```
+Vediamo che la variabile indipendente alfabet risulta essere significativa, la statistica F (in questo caso uguale alla statistica t) indica che il modello nel suo complesso è significativo ed abbiamo un R^2 pari a 0.3 il quale indica uno scarso adattamento ai dati.
+Nel caso vi fosse stata una un p value 0.09 si poteva dire che il coefficente della variabile in considerazione è diverso da zero ad un livello di significatività del 10%
+
+Andiamo a verificare la presenza di eteroschedasticità
+```{r }
+white.test(lin_nazioni)
+white_lm(lin_nazioni)
+```
+Vediamo che il test di white segnala la presenza di eteroschedasticità dei residui
+Verifichiamo la presenza di eteroschedasticità anche in maniera grafica
+```{r }
+plot(lin_nazioni$fitted.values, rstandard(lin_nazioni), xlab='fitted',ylab='std.residuals') 
+```
+Notiamo che i residui hanno un andamento a ventaglio, quindi si può desumere anche graficamente di essere in presenza di eteroschedasticità.
+
+Vediamo ora alcune trasformazioni applicate alle variabili dipendenti e indipendenti e come esse agiscono sulla bontà di adattamento del modello, sulla significatività delle variabili esplicative e sull'eteroschedasticità dei residui:
+
+- trasformazione lin-log
+```{r }
+linlog_nazioni<-lm(pil~I(log(alfabet)), nazioni)
+summary(linlog_nazioni)
+```
+
+Il coefficente 14566 va interpretato come un incremento del 1% del tasso di alfabetizzazione porta ad un incremento di 145 dollari del PIL (quandoo abbiamo solo il log nella var ind dividiamo per 100) 
+vediamo che il modello è ancora significativo, ma abbiamo perso di R^2 quindi possiamo dire che questo modello interpreta peggio i dati rispetto a quello lineare
+
+Andiamo di nuvo a controllare la presenza di eteroschedasticità dei residui:
+```{r }
+plot(linlog_nazioni$fitted.values, rstandard(linlog_nazioni), xlab='fitted',ylab='std.residuals', main="linlog")
+white_lm(linlog_nazioni) 
+```
+Vediamo che i residui si dispongono a ventaglio, quindi graficamente notiamo la presenza di eteroschedasticità. Che viene anche confermata dal White Test
+
+- Trasformazioni loglog
+```{r }
+loglog_nazioni<-lm((log(pil))~I(log(alfabet)), nazioni)
+summary(loglog_nazioni) 
+```
+Vediamo come la variabile alfabet rimane significativa e la capacità del modello di adattarsi ai dati migliora di molto R^2=0.5
+Il coefficente adesso si interpreta come elasticità, ovvero un rapporto tra variazioni percentuali (ovvero l'aumento del 1% del tasso di alfabetizzazione è associato ad un aumento del 3.9% del pilprocapite)
+
+Andiamo a valutare la presenza di eteroschedasticità:
+```{r }
+plot(loglog_nazioni$fitted.values, rstandard(loglog_nazioni), xlab='fitted',ylab='std.residuals', main="loglog")
+white_lm(loglog_nazioni)
+```
+Da questo grafico si vede un grande miglioramento dei residui, ma non posso dire nulla sull'eteroschedasticità, mentre il test di white è ancora significativo e quindi gli errori secondo il test sono ancora eteroschedastici.
+
+- trasformazioni loglin
+```{r }
+loglin_nazioni<-lm((log(pil))~alfabet, nazioni)
+summary(loglin_nazioni)
+``````
+Vediamo come il modello rimane significativo e l' R^2 migliora ancora arrivando a 0.6
+Il coefficente di alfabet cambia interpretazione ovvero aumento percentuale del pil a fronte di un aumento unitario del tasso di alfabetizzazione (un aumento del 0.06 di alfabet porta ad un aumento del 1% del pil)
+
+Andiamo a verificare se vi è ancora o meno la presenza di eteroschedasticità
+```{r }
+plot(loglin_nazioni$fitted.values, rstandard(loglin_nazioni), xlab='fitted',ylab='std.residuals', main="loglin")
+white_lm(loglin_nazioni)
+``````
+Graficamente vediamo che l'andamento dei residui sembra migliorato, in quanto sembrano essere più omoschedastici però non si capisce molto bene, notiamo che il p-value è alto e ciò porta all'accettazione dell'ipotesi nulla di omoschedasticità. Quindi per bontà di adattamento e per avere riportato gli errori ad essere omoschedastici questo modello sembra essere il migliore.       
+
+- trasformazioni polinomiali (in questo caso di secondo grado)
+```{r }
+quad1_nazioni<-lm(pil~alfabet+I(alfabet^2), nazioni)
+summary(quad1_nazioni)
+``````
+Vediamo che l'andamento quadratico di secondo grado è significativo in quanto sono significativi sia i due coefficenti, sia il test F
+Gli standard error così elevati dicono che potrebbe essere stata introdotta multicollinearità tra le variabili indipendenti
+In questo caso però potremmo avere introdotto multicollinearità tra le variabili esplicative, andiamo quindi a controllare
+```{r }
+vif(quad1_nazioni)
+`````
+Infatti il Vif di entrambe le variabili esplicative risulta essere molto maggiore di 10, questo stabilisce la presenza di multicollinearità tra le due variabili
+
+Per eliminare la multicollinearità possiamo centrare le variabili indipendenti:
+- procediamo in un primo momento a creare  la variabile centrata, che non è altro che la variabile meno la sua media
+```{r }
+nazioni$alfabet_centrata<-nazioni$alfabet-mean(nazioni$alfabet)
+`````
+- Andiamo a rifare la regressioni usando la variabile centrata ed il suo quadrato
+```{r }
+quad2_nazioni<-lm(pil~alfabet_centrata+I(alfabet_centrata^2), nazioni)
+summary(quad2_nazioni)
+`````
+Notiamo che abbiamo dei t-value molto più ampi, in quanto nel caso di multicollinearità gli standard error erano molto alti rispetto al loro valore reale
+```{r }
+plot(quad1_nazioni$fitted.values, quad2_nazioni$fitted.values, xlab='fitted quad1 (non cent)', ylab='fitted quad 2 (centr)')
+`````
+Vediamo che i valori fittati sono pressochè identici
+
+Andiamo a testare l'eteroschedasticità, in questo caso dato che abbiamo più di una variabile dipendente dobbiamo aggiungere le interazuibu all'interno del white test
+```{r }
+white_lm(quad2_nazioni, interaction=T)
+`````
+Vediamo che anche in questo caso gli errori sono eteroschedastici.
+
+
+## Verifica della presenza di multicollinearità
+Verificare la presenza di multicollinearità tra le variabili esplicative è una delle prime cose che deve essere fatta quando vogliamo fare una regressione che abbia più di una variabile esplicativa
+```{r }
+mod1_nazioni<-lm(pil~densita+urbana+vitafem+vitamas+alfabet+relig, nazioni)
+summary(mod1_nazioni)
+`````
+Vediamo che il modello ha un test F significativo, ovvero esiste almeno un coefficiente che è diverso da 0,in questo caso l'unica variabile significativa è la relig3 ovvero la presenza della religione protestante 
+
+Testiamo la presenza di multicollinearità
+
+-Matrice di correlazione anche tramite il comando pairs.panels come visto nella statistica descrittiva
+
+- VIF(Varianza multifattoriale)
+```{r }
+ols_vif_tol(mod1_nazioni)
+vif(mod1_nazioni)
+`````
+Considerando la soglia 10 vediamo un problema di multicollinearità per la variabili vitafem e vitamas, in quanto molto probabilmente l'aspettativa di vita delle femmine e dei maschi dipende dagli stessi fattori, quindi se ne deve inserire solo una delle due variabili esplicative
+
+ - Condition index
+```{r }
+ols_eigen_cindex(mod1_nazioni)
+
+`````
+
+Abbiamo ben due autovalori associati ad un condition index con autovalori maggiori di 30, uno dei due spiega pIù del 95% della vairbilità di vitamas e vitafem, quindi alche il condition index indica la presenza di multicollinearità tra queste due variabili e si procede ad omettere una fra vitamas e vitafem, oppure si potrebbe calcolarne la media.
+
+Decidiamo di togliere dal modello vitamas e andiamo di nuovo a testare la presenza di multicollinearità
+```{r }
+mod2_nazioni<-lm(pil~densita+urbana+vitafem+alfabet+relig, nazioni)
+summary(mod2_nazioni)
+ols_vif_tol(mod2_nazioni)
+ols_eigen_cindex(mod2_nazioni)
+`````
+Vediamo come anche la variabile vitafem diventa significativa e il nostro R^2 è aumentato
+Per i vif vediamo come vitafem e alfabet sono quelle più correlate, ma è minore di 10, quindi va bene così
+ols_eigen_cindex(mod2)
+notiamo come ci siano dei valori alti (>30 dell'ultimo autovalore), decidiamo di proseguire così anche se sarebbe ragionevole togliere una delle variabili vitafem, alfabet
+Il fatto di togliere o non togliere una variabile dipende sempre dal ragionamento teorico e esplicativo del nostro modello
+
+Generalmente dopo aver risolto il problema di multicollinearità nel modello si va ad indagare se vi è eteroschedasticità o meno.
+
+## Studio della normalità dei residui
+
+Costruiamo la nostra regressione
+```{r}
+m1_countries<-lm(Life.expectancy~ ISPs.million+ Irrigated+ Under.14 +Literacy.Rate,countries)
+summary(m1_countries)
+```
+La normalità dei residui viene in un primo luogo indagata graficamente, attraverso l'uso di un QQ-plot e anche dell'istogramma dei residui
+```{r}
+plot(m1_countries, which=2) # il prof consiglia di approfondire il which
+abline(h=-2)
+abline(h=2)
+hist(m1_countries$residuals)
+```
+Vediamo in questo caso che vi sono valori che si discostano dalla normalità (probabilmente sono degli outlier), anche se gli errori sembrano approssimativamente distribuirsi in  modo normale
+
+Andiamo a verificare la normalità tramite l'uso di alcuni test:
+```{r}
+ols_test_normality(m1_countries)
+
+```
+I primi due test ci segnalano la presenza di normalità infatti accettano l'ipotesi nulla( N.B:il test di shapiro-wilk è molto sensibile a gli outliers)
+
+
+## Studio degli outliers e dei valori influenti
+
+Costruisco gli scalari k e n, pari rispettivamente al numero di variabili + intercetta (utilizzate nel modello su cui voglio indagare
+gli outliers) e al numero delle osservazioni. Questi saranno utili per andare a costruire le soglie.
+```{r }
+k=length(coef(mod2_nazioni))
+k
+n=nrow(nazioni)
+n
+`````
+Vado ora ad indagare graficamente la presenza di outlier a livello grafico:
+```{r }
+par(mfrow=c(2,2))
+
+# primo grafico: distanza di cook vs indice delle osservazioni
+plot(mod2_nazioni,which=4)
+abline(h=4/n)
+
+#aggiungiamo ora il secondo plot che è covratio
+plot(covratio(mod2_nazioni),ylab='covratio')
+abline(h=1+3*k/n)
+abline(h=1-3*k/n)
+text(covratio(mod2_nazioni))
+
+#aggiungiamo ora il terzo plot studentized resisiduals vs leverage (anche detti hat values)
+#aggiungendo anche le soglie che per gli stud residuals sono +2 e -2
+#aggiungiamo anche le soglie di leverage che sono 2k/n
+plot(hatvalues(mod2_nazioni),rstudent(mod2_nazioni),xlab='leverage',ylab='studentized res')
+abline(h=2)
+abline(h=-2)
+abline(v=2*k/n)
+text(hatvalues(mod2_nazioni),rstudent(mod2_nazioni))
+
+#l'ultimo grafico da aggiungere è quello dei dffits che ha soglie 2*sqrt(k/n)
+plot(dffits(mod2_nazioni), ylab='DFFITS')
+text(dffits(mod2_nazioni))
+abline(h=2*sqrt(k/n))
+abline(h=-2*sqrt(k/n))
+`````
+Le soglie vengono usate come linee guida, ma la decisione di quali osservazioni effettivamente eliminare viene presa a braccio cercando di sintetizzare le informazioni date dai vari grafici, eliminerò quindi osservazioni che sono troppo 'fuori' in un grafico oppure osservazioni che vengono ritenute outliers su più grafici
+
+La cook's distance è una misura di influenza, ovvero di quanto un'osservazione influisca sulle stime dei parametri, vediamo che l'osservazione 5 ha un valore molto influente, notiamo anche che le osservazioni6 e 15 superano le soglie e bisogna prestare attenzione (anche se non superano le soglie) a le osservazioni 60,62 e anche la 57
+
+Il covratio è un'altra misura di influenza, notiamo osservazioni fuori dalle soglie come la 50, la 66 e la 60 (che era già stata notata precedentemente)
+
+I residui studentizzati ennesima misura di influenza, indica che la 66, la 50 (entrambe già evidenziate dal covratio) e la 5 (già evidenziata dalla distanza di coook sono osservazioni influenti)
+
+I levarage indicano la presenza di outlier nelle osservazoni 60,12 e 67
+
+Il DFFITS ci segnala soprattuto l'osservazione 5 che è molto fuori
+
+La decisione di escludere valori viene fatta escludendo inanzitutto gli outlier e poi fare a braccio e trovare quali osservazioni influenti escludere.
+
+
+Ora uso dbetas, la quale è una misura di influenza della singola osservazione sul singolo coefficente, ovvero escludo l'intercetta (di cui non si può fare a meno nel modello, o se si decide di escluderla bisogna comunque essere cauti) per andare a vedere quali outliers vi sono per ogni variabili indipendente
+```{r }
+dfbetasPlots(mod2_nazioni) 
+`````
+dfbetasPlots(mod2) #commenti al minuto 56
+Vediamo come l'osservazione 5 e 60 compaiono spesso,quindi anche i dfbetas ci danno alcune informaizioni che però avevamo già ottenuto dai grafici precedenti
+
+Prima di eliminare le osservazioni che presentano valori anomali voglio testare la normalità dei residui
+```{r }
+shapiro.test(mod2_nazioni$residuals)
+par(mfrow=c(1,1))
+plot(mod2_nazioni,which=2)
+`````
+Per il test di shapiro i residui risultano essere non normali (p-value<0.05)
+Il QQ plot ci segnala la presenza di valori estrremi come la 5, la 12 e la 60 (e soprattutto nella parte inziale ci sono degli scostamenti rispetto alla normale)
+
+Procedo ad eliminare gli outliers e le osservazioni influenti, come criteri usiamo un laverage > 2k/n e per gli studentized residuals usiamo valore assolute studentized residuals >2 (manteniamo quelli che non oltrepassano quindi queste soglie)
+```{r }
+nazioni2<-nazioni[hatvalues(mod2_nazioni)<=2*k/n & abs(rstudent(mod2_nazioni))<2,]
+mod3_nazioni<-lm(pil~densita+urbana+vitafem+alfabet+relig, nazioni2)
+`````
+confrontiamo le due regressioni con gli outliers e senza outliers
+```{r }
+summary(mod2_nazioni)
+summary(mod3_nazioni)
+`````
+ 
+il modello senza outliers spiega meglio il pil rispetto a quello con gli outliers
+
+## Studio dell'eteroschedasticità e risoluzione tramite il metodo FGLS
+Settiamo la regressione sulla quale verrà poi studiata l'eteroschedasticità
+```{r}
+mod1_companies<-lm(mark_val~assets+sales+profits+cash+employ,companies)
+summary(mod1_companies)
+```
+
+Andiamo ad indagare la presenza di eteroschedasticità inizialmente a livello grafico
+```{r}
+par(mfrow=c(2,2)) # (2,2) per comodità nella rappresentazione
+plot(mod1_companies$fitted,mod1_companies$residuals,xlab='fitted',ylab='residuals')
+abline(h=0)
+plot(mod1_companies$fitted,(mod1_companies$residuals)^2,xlab='fitted',ylab='residuals square')
+```
+La forma a ventaglio con la quale si distribuiscono i residui denota la presenza di eteroschedasticità
+Andiamo a veder il grafico dei residui rispetto ad ognuna delle variabili indipendenti
+```{r}
+par(mfrow=c(3,2))
+var_indipendenti<-c('assets','sales','profits','cash','employ')
+for (i in var_indipendenti){
+  plot(companies[,i],mod1_companies$residuals,xlab=i,ylab='residuals')
+}
+```
+Anche questo grafico segnala la presenza di eteroschedasticità
+
+Andiamo ora ad indagare la presenza di eteroschedasticità attraverso alcuni appositi test
+```{r}
+white.test(mod1_companies)
+white_lm(mod1_companies,interactions = T)
+```
+Entrambi segnalano la presenza di eteroschedasticità
+
+Vediamo ora la risoluzione del problema di eteroschedasticità attraverso lo stimatore FGLS, la quale si divide in step:
+- Costruire un modello che ha i residui al quadrato come variabile dipendendente e come x le variabili indipendenti del modello di regressione eteroschedastico
+```{r}
+aux_companies<-lm(I(mod1_companies$residuals^2)~assets+sales+profits+cash+employ,companies)
+summary(aux_companies)
+```
+- Andiamo a vedere le statistiche descrittive dei valori fitted del modello ausiliario
+```{r}
+summary(aux_companies$fitted.values)
+boxplot(aux_companies$fitted.values)
+```
+Vediamo che aux predice valori negativi dei residui al quadrato (quindi non è un buon modello perchè i residui al quadrato sono di per se positivi)
+Rispecifichiamo quindi aux_companies applicando ai residui al quadrato la funzione logaritmo, così da avere risultati che sono sempre positivi
+```{r}
+aux_companies<-lm(I(log(mod1_companies$residuals^2))~assets+sales+profits+cash+employ,companies)
+summary(aux_companies)
+```
+- Calcoliamo la standard deviation per ogni valore residuo, però prima devo ritrasformare dal logaritmo
+```{r}
+companies$varianza<-exp(aux_companies$fitted.values)
+companies$sd<-sqrt(companies$varianza)
+```
+
+- Si costruisce il modello FGLS con le variabili trasformate e lo confrontiamo con quello precedente che aveva errori eteroschedastici
+```{r}
+fgls1_companies<-lm(I(mark_val/sd)~0+I(1/sd)+I(assets/sd)+I(profits/sd)+I(sales/sd)+I(cash/sd)+I(employ/sd),companies)
+summary(fgls1_companies)
+summary(mod1_companies)
+```
+Vediamo che cash è rimasta significativa, anche se lo è molto meno, vediamo che il modello rimane significativo nel suo complesso e la bontà di afattamento del modello è cresciuta
+Andiamo a vedere se l'eteroschedasticità è stata risolta con il modello con stime FGLS
+```{r}
+white.test(fgls1_companies)
+```
+Vediamo che il test di white conferma che sia stata eliminata l'omoschedasticità dei residui
+
+
+Vi è anche un metodo alternativo per costruire gli stimatori FGLS (anche se il prof consiglia comunque di utilizzare il primo metodo)
+```{r}
+fgls2_companies<-lm(mark_val~assets+sales+profits+cash+employ, weights=(1/companies$varianza),companies)
+summary(fgls2_companies)
+
+
+```
+Vediamo che i risultati sono identici rispetto a fgls1 (l'unica cosa che cambia sono gli square)
+
+Andiamo a vedere ora un metodo alternativo per affrontare l'eteroschedasticità (guardare slide prof), HC3 viene utilizzato quando il dataset contiene meno di 250 osservazioni
+```{r}
+coeftest(mod1_companies, vcov=vcovHC(mod1_companies,type='HC3'))
+summary(mod1_companies)
+```
+Vediamo come i valori sono identici rispetto a quelli precedenti, ma gli std error sono più piccoli, quindi ci porteranno ad avere delle stime significative anche quando in realtà esse non lo sono
+
+N.B: l'eteroschedasticità potrebbe anche essere dovuta ad una forma funzionale sbagliata, quindi un tentativo da fare potrebbe essere quello di provare varie forme funzionali, prima di ricorrere alle stime FGLS
+
+## Studio e soluzione dell'autocorrelazione dei residui
+Andiamo inizialemente a costruire la nostra regressione e guardare com'è il nostro modello
+```{r}
+mod1_hartangel<-lm(ftheft~partic+degrees+mtheft,hartangel)
+summary(mod1_hartangel)
+```
+Tutte le variabili sono significative, modello nel suo complesso è significativo, l' R^2 è molto buono
+
+Andiamo a vedere che gli errori sono omoschedastici
+```{r}
+white_lm(mod1_hartangel)
+
+```
+
+Andiamo a vedere un diagramma dei residui nel tempo
+```{r}
+plot(hartangel$year,mod1_hartangel$residuals,xlab='year',ylab='residuals',type='b')
+abline(h=0)
+```
+Vediamo che vi sono situazioni che confermano un'autocorrelazione positiva di ordine 1 dei residui
+
+Andiamo a verificare questa evidenza grafica con i correlogrammi
+```{r}
+par(mfrow=c(2,1))
+acf(mod1_hartangel$residuals,main='autocorr. residuals')
+pacf(mod1_hartangel$residuals,main='autocorr. parziale residuals')
+```
+Emerge l'autocorrelazione positiva di ordine uno sia per quanto riguarda le autocorrelazioni e le autocorrelazioni, mentre vediamo che anche l'autocorrelazione di quarto ordine vuole emergere, ma non supera il livello di significatività
+
+Andiamo avedere con il test di darbinwatson se si ottengono ulteriori conferme riguardo la presenza di autocorrelazione (con max.lag=5 studiamo la presenza di autocorrelazione fino al quinto ordine)
+```{r}
+durbinWatsonTest(mod1_hartangel, max.lag=5)
+```
+Vediamo che con il test di Durbin Watson risulta significativa l'autocorrelazione di primo ordine
+
+3.Studio dell' autocorrelazione
+Cerchiamo di risolvere il problema di autocorrelazione con la procedura di cochrane-orcutt, la quale si divide in diversi passi, questa procedura può essere utilizzata anche per ordini superiori :
+
+- Ottenere i residui di mod1_hartangel, per fare ciò andiamo a creare i residui ritardati attraverso la funzione datacombine, andiamo in fine ad andare a visualizzare i dati per verificare di avere realmente creato i residui ritardati
+```{r}
+hartangel$u_hat<-mod1_hartangel$residuals
+hartangel<-slide(data=hartangel,Var='u_hat',TimeVar='year',NewVar='u_hat_lag')
+View(hartangel) 
+```
+- regressione di uhat su u_hat_lag (ovvero regressione dei residui sui residui di lag1), in quanto vogliamo andare a ricercare il coefficente di autocorrelazione p
+```{r}
+aux_hartangel<-lm(u_hat~u_hat_lag,hartangel)
+summary(aux_hartangel) 
+```
+Stimiamo il coefficente di autocorrelazione 0.5429
+
+- Memorizziamo il coefficiente di autocorrelazione (che corrisponde al secondo elemento di aux_hartangel)
+```{r}
+rho_hartangel<-aux_hartangel$coefficients[2]
+```
+- Tramite la funzione slide andiamo a creare ftheft lag e anche tutte le altre variabili lag (ritardate)
+```{r}
+hartangel<-slide(data=hartangel,Var='ftheft',TimeVar='year',NewVar='ftheft_lag')
+hartangel<-slide(data=hartangel,Var='mtheft',TimeVar='year',NewVar='mtheft_lag')
+hartangel<-slide(data=hartangel,Var='partic',TimeVar='year',NewVar='partic_lag')
+hartangel<-slide(data=hartangel,Var='degrees',TimeVar='year',NewVar='degrees_lag')
+View(hartangel)
+```
+- Andiamo a calcolare le variabili trasformate tramite il coefficente di autocorrelazione
+```{r}
+hartangel$ftheft_t<-hartangel$ftheft-rho_hartangel*hartangel$ftheft_lag
+hartangel$mtheft_t<-hartangel$mtheft-rho_hartangel*hartangel$mtheft_lag
+hartangel$partic_t<-hartangel$partic-rho_hartangel*hartangel$partic_lag
+hartangel$degrees_t<-hartangel$degrees-rho_hartangel*hartangel$degrees_lag
+hartangel$interc_t<-1-rho_hartangel
+```
+
+- Stimiamo il modello delle variabili trasformate (metto lo zero perchè devo togliere la costante del modello e al suo posto sarà inserito 1-rho) e lo confrontiamo con quello del modello con errori correlati
+```{r}
+mod2_hartangel<-lm(ftheft_t~0+interc_t+partic_t+ degrees_t+mtheft_t,hartangel)
+summary(mod2_hartangel)
+summary(mod1_hartangel)
+```
+Vediamo che dopo aver corretto per l'autocorrelazione mtheft non è più significativo e il modello si adatta molto bene ai dati
+
+Andiamo allora a vedere dal test di dw la presenza di autocorrelazione dei residui o meno a 5 lag
+```{r}
+durbinWatsonTest(mod2_hartangel, max.lag=5)
+```
+Vediamo che il test conferma che abbiamo eliminato l'autocorrelazione dei residui
+
+Controlliamo anche per via grafica di aver eliminato l'autocorrelazione dei residui
+```{r}
+acf(mod2_hartangel$residuals,main='autocorr. residui di mod2')
+pacf(mod2_hartangel$residuals,main='autocorr. parziale residui di mod 2')
+```
+vediamo anche come i correlogrammmi indicano che non vi sia più autocorrelazione
+
+```{r}
+plot(hartangel$year[-1], mod2_hartangel$residuals,xlab='year',ylab='residui mod2',type='b')
+abline(h=0)
+```
+Vediamo un secondo approccio, ovvero quello basato sul modello autoregressivo, order è un vettore con numero di AR, numero di differenziazioni, Numero di Ma. ML indica la massima verosomiglianza. se cambio nel vettore order il numero 1 con per esempio 4 calcolo le stime per autocorrelazioni di quarto ordine
+```{r}
+library('lmtest')
+mod3_hartangel<-arima(hartangel$ftheft, order=c(1,0,0),xreg=hartangel[,c('partic','degrees','mtheft')],method='ML')
+coeftest(mod3_hartangel) #abbiamo la significativit? di partic e degrees ma non pi? di mtheft
+```
+Se cambio nel vettore order il numero 1 con per esempio 4 calcolo le stime fino per le autocorrelazioni di quarto ordine
+```{r}
+mod4_hartangel<-arima(hartangel$ftheft, order=c(4,0,0),xreg=hartangel[,c('partic','degrees','mtheft')],method='ML')
+coeftest(mod4_hartangel)
+```
+Vedo che ar4 però non è significativa, tengo buona quindi l'ipotesi di autocorrelazione di primo ordine
+
+## Test F per restrizioni multiple sulle variabili singolarmente non significative 
+
+Andiamo ora a testare se vi siano delle restrizioni multiple, ovvero testare che siano uguali a zero i coefficienti delle variabili che non risultavano significative, ovvero urbana, alfabet e relig2 (nel dataset delle nazioni)
+```{r}
+
+linearHypothesis(mod3_nazioni,c('urbana=0','relig2=0', 'alfabet=0'))
+```
+vediamo che questo test ci porta a non rigettare l'ipotesi nulla che i tre coefficienti siano uguali a zero
+
+Creiamo quindi un nuovo dataset contenente solo le variabili ritenute significative
+```{r}
+mod4_nazioni<-lm(pil~densita+vitafem, nazioni2)
+summary(mod4_nazioni)
+```
+
+
+
+## MODELLO LINEARE CLASSICO MULTIVARIATO
+
+## Verifica delle assunzioni del modello lineare classico in ciascun modello (caso univariato)
+Per la verifica delle assunzioni e di tutti i modi di risoluzione ci si rifà a quanto detto nella sezione precedente, adesso vedremo un breve codice che serve in maniera rapida ad avere uno sguardo su tutte le ipotesi del modello classico (per il primo modello)
+```{r}
+par(mfrow=c(2,2))
+k<-length(coef(m1_countries))
+n<-length(m1_countries$fitted.values)
+
+#residui studentizzati vs laverage
+plot(hatvalues(m1_countries),rstudent(m1_countries),xlab='laverage',ylab='Stud. residuals')
+abline(h=-2)
+abline(h=2)
+abline(h=0)
+abline(v=2*k/n)
+text(hatvalues(m1_countries),rstudent(m1_countries))
+ #andiamo ora a vedere la distanza di cook
+plot(cooks.distance(m1_countries),type='h',ylab='Cook\'s Distance')
+abline(h=4/n)
+#eteroschedasticità: fitted vs residui standardizzati
+plot(fitted.values(m1_countries),rstandard(m1_countries),xlab='fitted',ylab='std.residual')
+abline(h=-2)
+abline(h=2)
+abline(h=0)
+#qq plot per la normalità
+plot(m1_countries, which=2) # il prof consiglia di approfondire il which
+abline(h=-2)
+abline(h=2)
+```
+Notiamo che i residui standardizzati assumono una forma a ventaglio, quindi siamo in presenza di eteroschedasticità.
+Notiamo che le osservazioni 10, 34 e 9 (soprattutto) sono riconosciute come punti influenti, soprattutto l'osservazione 9, la quale emerge anche come osservazione influente per quanto riguarda la distanza di cool, mentre le osservazioni 32, 38 e 22 sono riconosciuti come valori outlier. Vediamo in questo caso che vi sono valori che si discostano dalla normalità (probabilmente sono degli outlier), anche se gli errori sembrano approssimativamente distribuirsi in  modo normale.
+
+Possiamo controllare quanto visto graficamente anche a livello di test:
+```{r}
+#andremo a corroborare le seguenti idee con i relativi test
+white.test(m1_countries)
+#è significativo quindi si può rifiutare l'ipotesi nulla di omoschedasticità
+ols_test_normality(m1_countries)
+# i primi due test ci segnalano la presenza di normalità infatti accettano l'ipotesi nulla(N.B:il test di shapiro-wilk è molto sensibile a gli outliers)
+vif(m1_countries)
+#vediamo che non vi sono grossi problemi di muticollinearità, questo lo si poteva sapere anche dalla matrice di correlazione
+```
+
+Dovremo togliere le osservazioni 9,10 e 34 (influenti) e gli outliers, dovremmmo poi risolvere gli errori omoschedastici con i Fgls (ma non sono l'obiettivo di questa esercitazione quiundi andiamo avanti)
+
+Andiamo a dare uno sguardo alla possibile violazione delle ipotesi del modello lineare classico, anche per il secondo modello, cosi definito:
+```{r}
+m2_countries<-lm(Unemployment~ ISPs.million+ Irrigated+ Under.14 +Literacy.Rate,countries)
+summary(m2_countries)
+```
+
+Svolgiamo gli stessi passaggi che abbiamo svolto per il modello precedente
+```{r}
+par(mfrow=c(2,2))
+k<-length(coef(m2_countries))
+n<-length(m2_countries$fitted.values)
+
+#residui studentizzati vs laverage
+plot(hatvalues(m2_countries),rstudent(m2_countries),xlab='laverage',ylab='Stud. residuals')
+abline(h=-2)
+abline(h=2)
+abline(h=0)
+abline(v=2*k/n)
+text(hatvalues(m2_countries),rstudent(m2_countries))
+#andiamo ora a vedere la distanza di cook
+plot(cooks.distance(m2_countries),type='h',ylab='Cook\'s Distance')
+abline(h=4/n)
+#eteroschedasticità: fitted vs residui standardizzati
+plot(fitted.values(m2_countries),rstandard(m2_countries),xlba='fitted',ylab='std.residual')
+abline(h=-2)
+abline(h=2)
+abline(h=0)
+#qq plot per la normalità
+plot(m2_countries, which=2) # il prof consiglia di approfondire il which
+abline(h=-2)
+abline(h=2)
+
+#9,10,34 sono ancora dei valori influenti e abbiamo ancora 3 outlier che andrebbero tolti
+#guardando la cook almeno l osservazione 9 deve venire tolta dal dataset
+#sembra che abbiamo degli errori eteroschedastici
+# e gli errori in questo caso sembrano distribuirsi normalmente
+
+#andremo a corroborare le seguenti idee con i relativi test
+white.test(m2_countries)
+#è significativo quindi si può rifiutare l'ipotesi nulla di omoschedasticità
+ols_test_normality(m2_countries)
+#vediamo che i test ci dicono (contro la nostra previsione grafica) che gli errori si distribuiscono normalmente
+vif(m2_countries)
+#vediamo che non vi sono grossi problemi di muticollinearità, questo lo si poteva sapere anche dalla matrice di correlazione
+
+#dovremo togliere le osservazioni 9,10 e 34 (influenti) e gli outliers, dovremmmo poi risolvere gli errori eteroschedastici con i fgls (ma non sono l'obiettivo di questa esercitazione quindi andiamo avanti)
+
+```
+## Modello lineare multivariato e test d'ipotesi su restrizioni multiple
+
+Iniziamo costruendo il modello multivariato
+```{r}
+mv1_countries<-lm(cbind(Life.expectancy, Unemployment)~ISPs.million+ Irrigated+ Under.14 +Literacy.Rate,countries)
+summary(mv1_countries)
+```
+Vediamo che otteniamo esattamente gli stessi risultati di guardare i due modelli univariati in modo separato
+
+
+Proseguiamo ora svolgendo test d' ipotesi su restrizioni multiple
+
+Iniziamo stimando un modello nullo, ovvero un modello in cui compaia la sola costante e tutti i coefficenti siano nulli, in quanto vogliamo testare HO: tutti i coefficenti=0 in entrambe le equazioni
+```{r}
+mvnull_countries<-lm(cbind(Life.expectancy, Unemployment)~1,countries)  
+anova(mv1_countries,mvnull_countries)
+```
+Vediamo che la statistica F risulta significativa e ciò ci porta a rifiutare l'ipotesi nulla, quindi vi è almeno un coefficente che è significativo per almeno una variabile dipendente
+
+Andiamo a prendere ora i coefficienti che non sono significativi in entrambe le equazioni e andiamo a testarli:
+
+- prima ipotesi il coefficente Irrigated=0 in entrambe le equazioni
+```{r}
+linearHypothesis(mv1_countries,hypothesis.matrix=c('Irrigated=0'))
+```
+Vediamo che non si rifiuta l'ipotesi nulla, ovvero che irrigated non sia significativo per entrambe le equazioni, quindi proseguiamo a rimuovere irrigated da entrambi i modelli
+
+Costruiamo il nuovo modello di regressione multivariata escludendo irrigated
+```{r}
+mv2_countries<-lm(cbind(Life.expectancy, Unemployment)~ISPs.million+ Under.14 +Literacy.Rate,countries)
+summary(mv2_countries)
+```
+Vediamo che la variabile ISPs.million non è significativa, andiamo a testare che il coefficente ISPs.million=0 in entrambe le equazioni 
+```{r}
+linearHypothesis(mv2_countries,hypothesis.matrix=c('ISPs.million=0'))
+```
+Vediamo che non si rifiuta l'ipotesi nulla, ovvero che  ISP.million  non sia significativo per entrambe le equazioni, quindi proseguiamo a rimuovere ISP.million da entrambi i modelli
+
+Costruiamo il nuovo modello di regressione multivariata escludendo ISP.million
+```{r}
+mv3_countries<-lm(cbind(Life.expectancy, Unemployment)~ Under.14 +Literacy.Rate,countries)
+summary(mv3_countries)
+```
+Vediamo ce il coefficente di Literacy.Rate non è significativo, andiamo a testare che il coefficente ISPs.million=0 in entrambe le equazioni 
+```{r}
+linearHypothesis(mv3_countries,hypothesis.matrix=c('Literacy.Rate=0'))
+```
+Vediamo che non si rifiuta l'ipotesi nulla, ovvero che Literacy.Rate   non sia significativo per entrambe le equazioni, quindi proseguiamo a rimuovere Literacy.Rate da entrambi i modelli
+
+Costruiamo il nuovo modello di regressione multivariata escludendo Literacy.Rate
+```{r}
+mv4_countries<-lm(cbind(Life.expectancy, Unemployment)~ Under.14,countries)
+summary(mv4_countries)
+```
+Andiamo adesso a vedere cos'è successo nei vari modelli per quanto riguarda la bontà di adattamento
+```{r}
+summary(mv1_countries)$`Response Life.expectancy`$adj.r.squared
+summary(mv2_countries)$`Response Life.expectancy`$adj.r.squared
+summary(mv3_countries)$`Response Life.expectancy`$adj.r.squared
+summary(mv4_countries)$`Response Life.expectancy`$adj.r.squared
+```
+```{r}
+summary(mv1_countries)$`Response Unemployment`$adj.r.squared
+summary(mv2_countries)$`Response Unemployment`$adj.r.squared
+summary(mv3_countries)$`Response Unemployment`$adj.r.squared
+summary(mv4_countries)$`Response Unemployment`$adj.r.squared
+```
+Notiamo che avendo tolto delle variabili non significative il nostro indice di determinazione aggiustato (che tiene conto del numero delle variabili esplicative incluse nel modello) è aumentato
+
+### MODELLO SUR
+
+Consegna: Regressioni lineari multiple di packpc sulle covariate cpi, pop, income e tax per gli stati Arkansas (state=”AR”) e California (state=”CA”)
+
+N.B: la fase di preprocessing con subsetting è stata già effettuata ed esposta nella sezione di preprocessing
+
+Andiamo adesso a stimare i modelli di regressione, questi due modelli hanno variabili diverse (es. income viene trattato diversamente per ognun dei due stati, l'unica variabile in comune è cpi)
+```{r}
+ar1<-lm(packpc_AR~cpi+pop_AR+income_AR+tax_AR,cigarettesarca)
+summary(ar1)
+```
+Vediamo un F significativo un R^2 che spiega molto bene i dati e le variabili significative sono income e cpi 
+pairs.panels(d1) #vediamo che ci sono delle correlazioni molto elevate, queste dipendono sia al campione molto rispetto sia alla 
+```{r}
+ca1<-lm(packpc_CA~cpi+pop_CA+income_CA+tax_CA,cigarettesarca)
+summary(ca1)
+```
+Vediamo che F è significativo, buona capacità di adattamento ai dati, variabili significative cpi e pop_ca
+
+Andiamo a vedere le correlazioni tra i due modelli
+```{r}
+pairs.panels(cigarettesarca)
+```
+Notiamo che ci sono delle correlazioni molto grandi, questo è dovuto al fatto che le variabili sono state costruite dalla stessa variabile
+
+Ora dovremmo andare a vedere le ipotesi del modello lineare classico per ognuno dei due modelli (lo facciamo solo per uno in maniera del tutto didattica anche perchè non è lo scopo di questa parte)
+```{r}
+vif(ar1)
+#vediamo che ci sono dei problemi di multicollinearità molto importanti
+white.test(ar1)
+#abbiamo errori omoschedastici
+ols_test_normality(ar1)
+#vediamo che abbiamo degli errori normali
+```
+Andiamo ora a vedere la correlazione tra i residui di ar1 e ca1
+```{r}
+cor(resid(ar1),resid(ca1))
+```
+Vediamo che c'è una correlazione del 56% dei residui che non è poco, quindi possiamo utilizzare un modello apposito che accomoda questa condizione di correlazione dei residui, ovvero la integra all'interno del modello stesso. Ovvero il modello SUR
+
+Andiamo quindi a costruire un modello SUR
+
+Dobbiamo inanzitutto memorizzare le nostre regressioni all'interno di una lista
+
+```{r}
+elemento1<-packpc_AR~cpi+pop_AR+income_AR+tax_AR
+elemento2<-packpc_CA~cpi+pop_CA+income_CA+tax_CA
+sistema<-list(e1=elemento1,e2=elemento2)
+```
+
+Entriamo nel vivo del modello sure tramite la libreria systemfit
+```{r}
+sur_cigarettes<-systemfit(sistema,'SUR',data=cigarettesarca)
+summary(sur_cigarettes)
+```
+
+Vediamo che abbiamo degli R^2 molto simili alle stime precedenti e aumentano le variabili che sono significative, mentre i coefficienti non sono cambiati di molto rispetto a quelli precedenti
+
+##Testare l’uguaglianza dI coefficentre tra due equazioni
+
+Andiamo a testare l'uguaglianza del coefficiente cpi tra le due equazioni
+```{r}
+linearHypothesis(sur_cigarettes,'e1_cpi=e2_cpi')
+```
+Vediamo che il cpi è seignificativo, quindi rifiutiamo l'ipotesi nulla di uguaglianza di cpi tra le due equazioni
+
+vi è un modo alternativo, uguale, per testare l'ipotesi nulla di uguaglianza dei coefficienti e si articola nei seguenti passaggi:
+
+-estraggo i coefficienti del modello sur
+```{r}
+coef(sur_cigarettes)
+```
+-vediamo che coef(m1) è di 10 elementi quindi possiamo anche creare una matrice di ipotesi di 10 elementi
+```{r}
+lh1_cigarettes<-matrix(0,nrow=1,ncol=10) #creiamo una matrice di 0 di dimensioni 1x10
+```
+-andiamo adesso a localizzare cpi cehe è per e1 al secondo elemento e per e2 al settimo elemento
+```{r}
+lh1_cigarettes[2]<-1
+lh1_cigarettes[7]<-1
+```
+-andiamo a verificare l'ipotesi nulla
+```{r}
+linearHypothesis(sur_cigarettes,lh1_cigarettes) #identico al linearHypothesis fatto in precedenza
+```
+Consegna: Rimuovere variabili non significative dalla regressione al punto 3  e testare l’uguaglianza dei coefficienti di cpi con quelli ottenuti al punto 1.
+
+Procediamo rivedendo quali erano le variabili non significative
+```{r}
+summary(sur_cigarettes)
+```
+Inseriamo le nostre nuove regressioni all'interno di due elementi
+```{r}
+e1_cigarettes2<-packpc_AR~cpi+income_AR+tax_AR
+e2_cigarettes2<-packpc_CA~cpi+pop_CA
+sistema<-list(e1=e1_cigarettes2,e2=e2_cigarettes2)
+m2_cigarettes<-systemfit(sistema,'SUR',data=cigarettesarca)
+summary(m2_cigarettes)
+```
+Andiamo a testare l'uguaglianza dei coefficienti di cpi del modello sure con quelli ottenuti al punto 1
+```{r}
+
+coef(ar1)
+coef(ar1)[2]
+coef(ca1)[2]
+```
+Andiamo quindi ora a testare l'ipotesi nulla di uguaglianza dei coefficienti
+```{r}
+linearHypothesis(sur_cigarettes,c('e1_cpi=-257.7434','e2_cpi=-61.37899 '))
+```
+Non rifiutiamo l'ipotesi nulla che i coefficenti stimati tramite il modello sur siano uguali a quelli inizialmente stimati tramite il modello ols
+
+Le stime sure saranno tanto più efficenti di quelle OLS tanto più saranno alte le correlazioni tra i residui delle due equazioni
+
+## Modello sur in hsb
+Costruamo le due regressioni di interesse
+```{r}
+m1_hsb<-lm(science~math+prog+gender,hsb)
+summary(m1_hsb)
+m2_hsb<-lm(write~read+prog+gender,hsb)
+summary(m2_hsb)
+```
+Andiamo ad indagare la correlazione tra i residui delle due equazioni (due modelli)
+```{r}
+cor(resid(m1_hsb),resid(m2_hsb))
+cor(hsb$write,hsb$science)
+```
+Vediamo che tra i residui dei due modelli vi è una correlazione del 17% e tra le variabili dipendenti delle due equazioni vi è una correlazione del 57%, quindi si confutano le ipotesi alla base del modello lineare multivariato classico, andiamo quindi a creare un modello SUR
+```{r}
+e1_hsb<-science~math+prog+gender
+e2_hsb<-write~read+prog+gender
+syst<-list(e1=e1_hsb,e2=e2_hsb)
+sur_hsb<-systemfit(syst,'SUR',data=hsb)
+summary(sur_hsb)
+```
+Andiamo a vedere che l' R^2 sono rimasti più o meno come erano prima, vediamo che rispetto a m1 non ci sono grandi cambiamenti nei coefficenti ed emerge la significatività anche del sesso maschile, invece m1 sembra rimasto uguale
+
+
+N.B:ricordiamo che la lettura delle variabili dummy avviene per esempio in questo modo, chi è maschio (gendermale) ha voti più bassi in lettura rispoetto alle femmine a parita di altre condizioni(le femmine è la variabile che non compare), stessa cosa per le variabili dummy a 3 variabili
+
+ 
+Test significatività di prog in entrambe le equazioni, testiamo quindi prog=0 ovvero testare che non vi sia differenza tra i tipi di istruzione scelta rispetto alle variabili dipendenti
+```{r}
+linearHypothesis(sur_hsb,c('e1_proggeneral=0','e2_proggeneral=0','e1_progvocational=0','e2_progvocational=0'))
+
+```
+Vediamo ch questo test è significativo, ovvero esiste almeno un coefficente che è diverso da 0
+
+Test di uguaglianza dei coefficienti di gender tra equazioni
+```{r}
+linearHypothesis(sur_hsb,c('e1_gendermale=e2_gendermale'))
+```
+Vediamo come atteso che sono differenti
+
+
